@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-MovieSearchBot - Kino qidiruv boti (TO'LIQ TUZATILGAN VERSIYA)
+MovieSearchBot - Kino qidiruv boti (TO'LIQ ISHLOVCHI VERSIYA)
 """
 
 import os
@@ -89,7 +89,7 @@ def init_db():
             PRIMARY KEY (user_id, movie_id)
         )
     """)
-    cur.execute("""
+    cur.execute(""")
         CREATE TABLE IF NOT EXISTS required_channels (
             channel_username TEXT PRIMARY KEY
         )
@@ -106,7 +106,7 @@ def init_db():
             value TEXT
         )
     """)
-    # Migrate old tables - add code column if not exists
+    # Add code column if missing
     try:
         cur.execute("ALTER TABLE movies ADD COLUMN code TEXT UNIQUE")
     except sqlite3.OperationalError:
@@ -263,8 +263,7 @@ def get_movie_by_code(code: str):
 
 def search_movies(query_term: str):
     term = f"%{query_term}%"
-    rows = execute_query("SELECT * FROM movies WHERE name LIKE ? OR code LIKE ? ORDER BY name", (term, term), fetch_all=True)
-    return rows if rows else []
+    return execute_query("SELECT * FROM movies WHERE name LIKE ? OR code LIKE ? ORDER BY name", (term, term), fetch_all=True) or []
 
 def get_movies_by_filter(genre=None, year=None, rating=None):
     sql = "SELECT * FROM movies WHERE 1=1"
@@ -304,13 +303,12 @@ def get_recent_movies_count(days=7):
     return res[0] if res else 0
 
 def get_favorites(user_id: int):
-    rows = execute_query("""
+    return execute_query("""
         SELECT m.* FROM movies m
         JOIN user_favorites f ON m.id = f.movie_id
         WHERE f.user_id = ?
         ORDER BY f.added_at DESC
-    """, (user_id,), fetch_all=True)
-    return rows if rows else []
+    """, (user_id,), fetch_all=True) or []
 
 def add_favorite(user_id: int, movie_id: int):
     execute_query("INSERT OR IGNORE INTO user_favorites (user_id, movie_id) VALUES (?, ?)", (user_id, movie_id))
@@ -391,14 +389,13 @@ def build_search_keyboard(user_id, page=0, per_page=5):
 def post_movie_to_channel(movie):
     channel_id = get_config("output_channel")
     if not channel_id:
-        logger.warning("Output channel not configured")
+        logger.warning("Output channel not configured, skipping post.")
         return
     try:
         channel_id = int(channel_id)
     except ValueError:
         pass
     movie_id = movie[0]
-    movie_name = movie[1]
     caption = format_movie_info(movie)
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("✏️ Kinoni tahrirlash", callback_data=f"edit_movie_{movie_id}"))
@@ -408,9 +405,9 @@ def post_movie_to_channel(movie):
             bot.send_photo(channel_id, poster_url, caption=caption, reply_markup=markup, parse_mode="HTML")
         else:
             bot.send_message(channel_id, caption, reply_markup=markup, parse_mode="HTML")
-        logger.info(f"Movie '{movie_name}' posted to channel {channel_id}")
+        logger.info(f"Movie '{movie[1]}' posted to channel {channel_id}")
     except Exception as e:
-        logger.error(f"Failed to post to channel: {e}")
+        logger.error(f"Failed to post movie to channel: {e}")
 
 # ---------------------------- Handlers ---------------------------------
 def show_main_menu(chat_id):
@@ -462,22 +459,17 @@ def handle_text(message: Message):
     text = message.text.strip()
     if not text:
         return
-    
-    # Check if it's a movie code
     if text.startswith("MOV_"):
         movie = get_movie_by_code(text)
         if movie:
             send_movie_info(message.chat.id, movie, show_fav_button=True, user_id=message.from_user.id)
             increment_search_term(text)
             return
-    
-    # Normal search
     increment_search_term(text)
     results = search_movies(text)
     if not results:
         bot.reply_to(message, "❌ Hech qanday kino topilmadi.\n\n💡 Maslahat: Kino kodini yoki nomini yuboring.")
         return
-    
     user_id = message.from_user.id
     user_search_results[user_id] = results
     user_current_page[user_id] = 0
@@ -493,7 +485,6 @@ def handle_callback(call: CallbackQuery):
     if not ensure_subscription(user_id, chat_id):
         return
 
-    # Subscription check
     if data == "check_subscription":
         ok, _ = check_user_subscription(user_id)
         update_last_sub_check(user_id)
@@ -517,7 +508,7 @@ def handle_callback(call: CallbackQuery):
         if movie:
             send_movie_info(chat_id, movie, show_fav_button=True, user_id=user_id)
         else:
-            bot.send_message(chat_id, "❌ Hozircha hech qanday kino yo'q.\n\nAdmin panelga o'tib kino qo'shing.")
+            bot.send_message(chat_id, "❌ Hozircha hech qanday kino yo'q.\nAdmin panelga o'tib kino qo'shing.")
         return
 
     elif data == "stats_user":
@@ -532,7 +523,7 @@ def handle_callback(call: CallbackQuery):
     elif data == "favorites":
         favs = get_favorites(user_id)
         if not favs:
-            bot.send_message(chat_id, "❤️ Sevimlilar ro'yxati bo'sh.\n\nKinoni ko'rib, ❤️ tugmasini bosing.")
+            bot.send_message(chat_id, "❤️ Sevimlilar ro'yxati bo'sh.\nKinoni ko'rib, ❤️ tugmasini bosing.")
             return
         user_search_results[user_id] = favs
         user_current_page[user_id] = 0
@@ -615,7 +606,7 @@ def handle_callback(call: CallbackQuery):
     elif data == "admin_edit_movie":
         if not is_admin(user_id):
             return
-        bot.send_message(chat_id, "✏️ Tahrirlash uchun kino ID sini yuboring:\n\n(ID ni bilish uchun /start -> Kino qidirish -> kinoni toping va ID ga qarang)")
+        bot.send_message(chat_id, "✏️ Tahrirlash uchun kino ID sini yuboring:")
         bot.register_next_step_handler(call.message, admin_edit_movie_select)
         return
 
@@ -629,7 +620,7 @@ def handle_callback(call: CallbackQuery):
     elif data == "admin_add_admin":
         if not is_admin(user_id):
             return
-        bot.send_message(chat_id, "👥 Admin qo'shish uchun foydalanuvchi ID sini yuboring:\n\n(ID ni bilish uchun @userinfobot dan foydalaning)")
+        bot.send_message(chat_id, "👥 Admin qo'shish uchun foydalanuvchi ID sini yuboring:")
         bot.register_next_step_handler(call.message, admin_add_admin_by_id)
         return
 
@@ -727,4 +718,309 @@ def handle_callback(call: CallbackQuery):
         current = get_config("output_channel") or "❌ Sozlanmagan"
         markup = InlineKeyboardMarkup(row_width=1)
         markup.add(InlineKeyboardButton("📤 Chiqish kanalini sozlash", callback_data="admin_set_output_channel"))
-        markup.add(Inline
+        markup.add(InlineKeyboardButton("🔙 Orqaga", callback_data="admin_panel"))
+        bot.edit_message_text(f"📢 Hozirgi chiqish kanali: <code>{current}</code>\n\nKino qo'shilganda shu kanalga post yuboriladi.", chat_id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
+        return
+
+    elif data == "admin_set_output_channel":
+        if not is_admin(user_id):
+            return
+        bot.send_message(chat_id, "📤 Kanal ID yoki @username ni yuboring (masalan: -1001234567890 yoki @my_channel):\nBot kanalga post yuborishi uchun kanalga admin qo'shilgan bo'lishi kerak.")
+        bot.register_next_step_handler(call.message, admin_set_output_channel_step)
+        return
+
+    elif data == "admin_broadcast":
+        if not is_admin(user_id):
+            return
+        bot.send_message(chat_id, "📢 Reklama xabarini yuboring (matn yoki rasm bilan):")
+        bot.register_next_step_handler(call.message, admin_broadcast_send)
+        return
+
+    elif data == "back_to_list":
+        if user_id in user_search_results and user_search_results[user_id]:
+            page = user_current_page.get(user_id, 0)
+            markup = build_search_keyboard(user_id, page)
+            bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
+        else:
+            show_main_menu(chat_id)
+        return
+
+    elif data.startswith("edit_movie_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "Faqat adminlar tahrirlashi mumkin!", show_alert=True)
+            return
+        movie_id = int(data.split("_")[2])
+        movie = get_movie_by_id(movie_id)
+        if not movie:
+            bot.answer_callback_query(call.id, "Kino topilmadi!")
+            return
+        markup = InlineKeyboardMarkup(row_width=2)
+        fields = ["name", "year", "genre", "rating", "description", "poster_url", "duration", "director", "actors"]
+        for f in fields:
+            markup.add(InlineKeyboardButton(f.capitalize(), callback_data=f"editfield_{f}_{movie_id}"))
+        markup.add(InlineKeyboardButton("🔙 Bekor qilish", callback_data="main_menu"))
+        bot.send_message(chat_id, f"✏️ <b>{movie[1]}</b> kinosini tahrirlash:", reply_markup=markup, parse_mode="HTML")
+        return
+
+    elif data.startswith("editfield_"):
+        if not is_admin(user_id):
+            bot.answer_callback_query(call.id, "Ruxsat yo'q!")
+            return
+        parts = data.split("_")
+        field = parts[1]
+        movie_id = int(parts[2])
+        user_states[user_id] = {"action": "edit_movie", "movie_id": movie_id, "edit_field": field}
+        bot.send_message(chat_id, f"Yangi qiymatni yuboring (maydon: {field}):")
+        bot.register_next_step_handler(call.message, process_edit_value)
+        return
+
+    else:
+        bot.answer_callback_query(call.id, "Noma'lum buyruq")
+
+# ---------------------------- Admin step helpers ---------------------------------
+def admin_add_channel_step(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    ch = message.text.strip().lstrip('@')
+    add_required_channel(ch)
+    bot.reply_to(message, f"✅ Kanal @{ch} majburiy kanallarga qo'shildi.")
+    show_admin_panel(message.chat.id)
+
+def admin_set_output_channel_step(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    channel = message.text.strip()
+    try:
+        if channel.startswith('@'):
+            chat = bot.get_chat(channel)
+        else:
+            chat = bot.get_chat(int(channel))
+        set_config("output_channel", str(chat.id))
+        bot.reply_to(message, f"✅ Chiqish kanali sozlandi: {chat.title} (ID: {chat.id})\nEndi har bir yangi kino shu kanalga post qilinadi.")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Xatolik: {e}\nKanal ID yoki @username to'g'riligini tekshiring. Bot kanalga post yuborish huquqiga ega bo'lishi kerak.")
+    show_admin_panel(message.chat.id)
+
+def admin_broadcast_send(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    users = execute_query("SELECT user_id FROM users", fetch_all=True)
+    count = 0
+    for u in users:
+        try:
+            if message.photo:
+                bot.send_photo(u[0], message.photo[-1].file_id, caption=message.caption)
+            else:
+                bot.send_message(u[0], message.text)
+            count += 1
+        except Exception as e:
+            logger.error(f"Broadcast failed to {u[0]}: {e}")
+    bot.reply_to(message, f"✅ Xabar {count} foydalanuvchiga yuborildi.")
+    show_admin_panel(message.chat.id)
+
+def admin_add_admin_by_id(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        target_id = int(message.text.strip())
+    except ValueError:
+        bot.reply_to(message, "Noto'g'ri ID! Iltimos, raqam yuboring.")
+        return
+    execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (target_id,))
+    add_admin(target_id)
+    bot.reply_to(message, f"✅ Foydalanuvchi {target_id} admin qilib belgilandi.")
+    show_admin_panel(message.chat.id)
+
+def admin_edit_movie_select(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        movie_id = int(message.text.strip())
+    except ValueError:
+        bot.reply_to(message, "Noto'g'ri ID! Iltimos, raqam yuboring.")
+        return
+    movie = get_movie_by_id(movie_id)
+    if not movie:
+        bot.reply_to(message, "Bunday ID li kino yo'q.")
+        return
+    markup = InlineKeyboardMarkup(row_width=2)
+    fields = ["name", "year", "genre", "rating", "description", "poster_url", "duration", "director", "actors"]
+    for f in fields:
+        markup.add(InlineKeyboardButton(f.capitalize(), callback_data=f"editfield_{f}_{movie_id}"))
+    markup.add(InlineKeyboardButton("🔙 Bekor qilish", callback_data="admin_panel"))
+    bot.send_message(message.chat.id, f"✏️ Kino ID {movie_id} tahrirlanmoqda. Qaysi maydonni o'zgartirmoqchisiz?", reply_markup=markup)
+
+def admin_delete_movie(message: Message):
+    if not is_admin(message.from_user.id):
+        return
+    try:
+        movie_id = int(message.text.strip())
+    except ValueError:
+        bot.reply_to(message, "Noto'g'ri ID!")
+        return
+    movie = get_movie_by_id(movie_id)
+    if not movie:
+        bot.reply_to(message, "Kino topilmadi.")
+        return
+    delete_movie(movie_id)
+    bot.reply_to(message, f"✅ {movie[1]} o'chirildi.")
+    show_admin_panel(message.chat.id)
+
+def process_edit_value(message: Message):
+    user_id = message.from_user.id
+    if not is_admin(user_id):
+        return
+    state = user_states.get(user_id, {})
+    if state.get("action") != "edit_movie" or "edit_field" not in state:
+        bot.reply_to(message, "Xatolik. Qaytadan urinib ko'ring.")
+        return
+    movie_id = state["movie_id"]
+    field = state["edit_field"]
+    new_value = message.text.strip()
+    update_movie(movie_id, field, new_value)
+    bot.reply_to(message, f"✅ {field} yangilandi.")
+    del user_states[user_id]
+    show_admin_panel(message.chat.id)
+
+@bot.message_handler(func=lambda m: user_states.get(m.from_user.id, {}).get("action") == "add_movie")
+def add_movie_step(message: Message):
+    user_id = message.from_user.id
+    state = user_states[user_id]
+    step = state["step"]
+    if step == "name":
+        name = message.text.strip()
+        if not name:
+            bot.reply_to(message, "Kino nomi bo'sh bo'lishi mumkin emas. Qaytadan yuboring:")
+            return
+        state["name"] = name
+        state["step"] = "year"
+        bot.send_message(message.chat.id, "📅 Yilni yuboring (masalan: 2020):")
+    elif step == "year":
+        try:
+            year = int(message.text.strip())
+            state["year"] = year
+            state["step"] = "genre"
+            bot.send_message(message.chat.id, "🎭 Janrni yuboring (masalan: Drama, Komediya):")
+        except ValueError:
+            bot.reply_to(message, "Noto'g'ri yil. Faqat raqam yuboring:")
+    elif step == "genre":
+        state["genre"] = message.text.strip()
+        state["step"] = "rating"
+        bot.send_message(message.chat.id, "⭐ Reytingni yuboring (0-10 oralig'ida, masalan: 8.5):")
+    elif step == "rating":
+        try:
+            rating = float(message.text.strip())
+            if rating < 0 or rating > 10:
+                raise ValueError
+            state["rating"] = rating
+            state["step"] = "description"
+            bot.send_message(message.chat.id, "📖 Tavsifni yuboring (kino haqida qisqacha):")
+        except ValueError:
+            bot.reply_to(message, "Noto'g'ri reyting. 0-10 oralig'idagi son yuboring:")
+    elif step == "description":
+        state["description"] = message.text.strip()
+        state["step"] = "poster"
+        bot.send_message(message.chat.id, "🖼 Poster URL manzilini yuboring (rasm linki):\nMisol: https://example.com/poster.jpg")
+    elif step == "poster":
+        state["poster_url"] = message.text.strip()
+        state["step"] = "duration"
+        bot.send_message(message.chat.id, "⏱ Davomiyligini yuboring (masalan: 120 min, 2 soat):")
+    elif step == "duration":
+        state["duration"] = message.text.strip()
+        state["step"] = "director"
+        bot.send_message(message.chat.id, "🎥 Rejissyor ismini yuboring:")
+    elif step == "director":
+        state["director"] = message.text.strip()
+        state["step"] = "actors"
+        bot.send_message(message.chat.id, "🌟 Aktyorlarni vergul bilan ajratib yuboring (masalan: Aktyor1, Aktyor2):")
+    elif step == "actors":
+        state["actors"] = message.text.strip()
+        # Save movie
+        movie_id, code = add_movie(
+            state["name"], state["year"], state["genre"], state["rating"],
+            state["description"], state["poster_url"], state["duration"],
+            state["director"], state["actors"]
+        )
+        bot.send_message(message.chat.id, f"✅ Kino muvaffaqiyatli qo'shildi!\n🔑 Kino kodi: <code>{code}</code>\nFoydalanuvchilar ushbu kod orqali kinoni topishi mumkin.", parse_mode="HTML")
+        # Post to channel if configured
+        movie = get_movie_by_id(movie_id)
+        if movie:
+            post_movie_to_channel(movie)
+        del user_states[user_id]
+        show_admin_panel(message.chat.id)
+
+def process_filter_genre(message: Message, user_id: int):
+    genre = message.text.strip()
+    results = get_movies_by_filter(genre=genre)
+    if not results:
+        bot.reply_to(message, "Bu janrda hech qanday kino topilmadi.")
+        return
+    user_search_results[user_id] = results
+    user_current_page[user_id] = 0
+    markup = build_search_keyboard(user_id, 0)
+    bot.send_message(message.chat.id, f"🎭 Janr: {genre} bo'yicha natijalar:", reply_markup=markup)
+
+def process_filter_year(message: Message, user_id: int):
+    try:
+        year = int(message.text.strip())
+    except:
+        bot.reply_to(message, "Noto'g'ri yil format.")
+        return
+    results = get_movies_by_filter(year=year)
+    if not results:
+        bot.reply_to(message, f"{year} yilida hech qanday kino topilmadi.")
+        return
+    user_search_results[user_id] = results
+    user_current_page[user_id] = 0
+    markup = build_search_keyboard(user_id, 0)
+    bot.send_message(message.chat.id, f"📅 {year} yilidagi kinolar:", reply_markup=markup)
+
+def process_filter_rating(message: Message, user_id: int):
+    try:
+        rating = float(message.text.strip())
+    except:
+        bot.reply_to(message, "Noto'g'ri reyting.")
+        return
+    results = get_movies_by_filter(rating=rating)
+    if not results:
+        bot.reply_to(message, f"{rating}+ reytingli kino topilmadi.")
+        return
+    user_search_results[user_id] = results
+    user_current_page[user_id] = 0
+    markup = build_search_keyboard(user_id, 0)
+    bot.send_message(message.chat.id, f"⭐ Reyting {rating}+ bo'lgan kinolar:", reply_markup=markup)
+
+# ---------------------------- Flask webhook endpoint -------------------------
+@app.route(WEBHOOK_PATH, methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return 'OK', 200
+    else:
+        abort(403)
+
+@app.route('/', methods=['GET'])
+def index():
+    return "MovieSearchBot is running!", 200
+
+# ---------------------------- Main -------------------------------------------
+if __name__ == "__main__":
+    init_db()
+    # Initialize admins from ADMIN_IDS env
+    if ADMIN_IDS:
+        for aid_str in ADMIN_IDS.split(","):
+            try:
+                aid = int(aid_str.strip())
+                execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (aid,))
+                add_admin(aid)
+                logger.info(f"Added admin {aid}")
+            except ValueError:
+                pass
+    # Set webhook
+    bot.remove_webhook()
+    bot.set_webhook(url=WEBHOOK_URL)
+    logger.info(f"Webhook set to {WEBHOOK_URL}")
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
