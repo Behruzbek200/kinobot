@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-MovieSearchBot - Telegram bot for searching movies, with admin panel and forced channel subscription.
-Deployed on Render with Flask webhook.
+MovieSearchBot - To'liq ishlaydigan versiya
 """
 
 import os
@@ -26,7 +25,7 @@ TOKEN = os.environ.get("BOT_TOKEN")
 if not TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set")
 
-DEFAULT_ADMIN_ID = os.environ.get("DEFAULT_ADMIN_ID")
+ADMIN_IDS = os.environ.get("ADMIN_IDS", "")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app.onrender.com")
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
@@ -214,10 +213,15 @@ def subscription_required(handler):
 
 # ---------------------------- Movie CRUD ---------------------------------
 def add_movie(name, year, genre, rating, description, poster_url, duration, director, actors):
+    logger.info(f"Adding movie: {name}, {year}, {genre}")
     execute_query("""
         INSERT INTO movies (name, year, genre, rating, description, poster_url, duration, director, actors)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (name, year, genre, rating, description, poster_url, duration, director, actors))
+    # Get the last inserted ID to verify
+    last_id = execute_query("SELECT last_insert_rowid()", fetch_one=True)[0]
+    logger.info(f"Movie added with ID: {last_id}")
+    return last_id
 
 def update_movie(movie_id, field, value):
     allowed = ["name", "year", "genre", "rating", "description", "poster_url", "duration", "director", "actors"]
@@ -289,24 +293,62 @@ def remove_favorite(user_id: int, movie_id: int):
     execute_query("DELETE FROM user_favorites WHERE user_id = ? AND movie_id = ?", (user_id, movie_id))
 
 def format_movie_info(movie) -> str:
-    (mid, name, year, genre, rating, desc, poster, duration, director, actors, _) = movie
-    text = f"🎬 <b>{name}</b> ({year})\n⭐ Reyting: {rating}/10\n🎭 Janr: {genre}\n⏱ Davomiyligi: {duration}\n🎥 Rejissyor: {director}\n🌟 Aktyorlar: {actors}\n📖 Tavsif:\n{desc}\n"
+    """
+    movie tuple indexlari:
+    0: id
+    1: name
+    2: year
+    3: genre
+    4: rating
+    5: description
+    6: poster_url
+    7: duration
+    8: director
+    9: actors
+    10: created_at
+    """
+    if not movie:
+        return "Kino ma'lumotlari topilmadi."
+    
+    name = movie[1] if len(movie) > 1 else "Noma'lum"
+    year = movie[2] if len(movie) > 2 else "?"
+    rating = movie[4] if len(movie) > 4 else "0"
+    genre = movie[3] if len(movie) > 3 else "Noma'lum"
+    duration = movie[7] if len(movie) > 7 else "?"
+    director = movie[8] if len(movie) > 8 else "Noma'lum"
+    actors = movie[9] if len(movie) > 9 else "Noma'lum"
+    desc = movie[5] if len(movie) > 5 else "Tavsif yo'q"
+    
+    text = f"🎬 <b>{name}</b> ({year})\n"
+    text += f"⭐ Reyting: {rating}/10\n"
+    text += f"🎭 Janr: {genre}\n"
+    text += f"⏱ Davomiyligi: {duration}\n"
+    text += f"🎥 Rejissyor: {director}\n"
+    text += f"🌟 Aktyorlar: {actors}\n"
+    text += f"📖 Tavsif:\n{desc}\n"
     return text
 
 def send_movie_info(chat_id, movie, show_fav_button=True, user_id=None):
-    (mid, name, year, genre, rating, desc, poster, duration, director, actors, _) = movie
+    if not movie:
+        bot.send_message(chat_id, "❌ Kino topilmadi!")
+        return
+    
+    movie_id = movie[0]
     caption = format_movie_info(movie)
+    
     markup = None
     if show_fav_button and user_id:
-        fav_check = execute_query("SELECT 1 FROM user_favorites WHERE user_id = ? AND movie_id = ?", (user_id, mid), fetch_one=True)
+        fav_check = execute_query("SELECT 1 FROM user_favorites WHERE user_id = ? AND movie_id = ?", (user_id, movie_id), fetch_one=True)
         fav_text = "❤️ Sevimlilarga qo'shish" if not fav_check else "❌ Sevimlilardan o'chirish"
-        fav_cb = f"fav_{mid}" if not fav_check else f"unfav_{mid}"
+        fav_cb = f"fav_{movie_id}" if not fav_check else f"unfav_{movie_id}"
         markup = InlineKeyboardMarkup()
         markup.add(InlineKeyboardButton(fav_text, callback_data=fav_cb))
         markup.add(InlineKeyboardButton("🔙 Orqaga", callback_data="back_to_list"))
-    if poster and poster.startswith("http"):
+    
+    poster_url = movie[6] if len(movie) > 6 else None
+    if poster_url and poster_url.startswith("http"):
         try:
-            bot.send_photo(chat_id, poster, caption=caption, reply_markup=markup, parse_mode="HTML")
+            bot.send_photo(chat_id, poster_url, caption=caption, reply_markup=markup, parse_mode="HTML")
         except Exception as e:
             logger.error(f"Failed to send photo: {e}")
             bot.send_message(chat_id, caption, reply_markup=markup, parse_mode="HTML")
@@ -320,9 +362,13 @@ def build_search_keyboard(user_id, page=0, per_page=5):
     start = page * per_page
     end = start + per_page
     movies_page = results[start:end]
+    
     markup = InlineKeyboardMarkup(row_width=1)
     for m in movies_page:
-        markup.add(InlineKeyboardButton(f"🎬 {m[1]}", callback_data=f"movie_{m[0]}"))
+        movie_id = m[0]
+        movie_name = m[1]  # name index 1
+        markup.add(InlineKeyboardButton(f"🎬 {movie_name}", callback_data=f"movie_{movie_id}"))
+    
     nav_buttons = []
     if page > 0:
         nav_buttons.append(InlineKeyboardButton("⬅️ Oldingi", callback_data=f"page_{page-1}"))
@@ -512,7 +558,6 @@ def handle_callback(call: CallbackQuery):
         show_admin_panel(chat_id)
         return
 
-    # Admin callbacks (same as before)
     elif data == "admin_add_movie":
         if not is_admin(user_id):
             return
@@ -758,56 +803,95 @@ def add_movie_step(message: Message):
     user_id = message.from_user.id
     state = user_states[user_id]
     step = state["step"]
+    
     if step == "name":
-        state["name"] = message.text.strip()
+        movie_name = message.text.strip()
+        if not movie_name:
+            bot.reply_to(message, "Kino nomi bo'sh bo'lishi mumkin emas. Qaytadan yuboring:")
+            return
+        state["name"] = movie_name
         state["step"] = "year"
         bot.send_message(message.chat.id, "Yilni yuboring (masalan: 2020):")
+        
     elif step == "year":
         try:
-            state["year"] = int(message.text.strip())
-        except:
-            bot.reply_to(message, "Noto'g'ri yil, qayta yuboring:")
+            year = int(message.text.strip())
+            state["year"] = year
+            state["step"] = "genre"
+            bot.send_message(message.chat.id, "Janrni yuboring (masalan: Drama, Komediya):")
+        except ValueError:
+            bot.reply_to(message, "Noto'g'ri yil. Faqat raqam yuboring (masalan: 2020):")
             return
-        state["step"] = "genre"
-        bot.send_message(message.chat.id, "Janrni yuboring:")
+            
     elif step == "genre":
         state["genre"] = message.text.strip()
         state["step"] = "rating"
-        bot.send_message(message.chat.id, "Reytingni yuboring (0-10 oralig'ida):")
+        bot.send_message(message.chat.id, "Reytingni yuboring (0-10 oralig'ida, masalan: 8.5):")
+        
     elif step == "rating":
         try:
-            state["rating"] = float(message.text.strip())
-        except:
-            bot.reply_to(message, "Noto'g'ri reyting, qayta yuboring:")
+            rating = float(message.text.strip())
+            if rating < 0 or rating > 10:
+                bot.reply_to(message, "Reyting 0 dan 10 gacha bo'lishi kerak. Qayta yuboring:")
+                return
+            state["rating"] = rating
+            state["step"] = "description"
+            bot.send_message(message.chat.id, "Tavsifni yuboring (kino haqida qisqacha):")
+        except ValueError:
+            bot.reply_to(message, "Noto'g'ri reyting. Raqam yuboring (masalan: 8.5):")
             return
-        state["step"] = "description"
-        bot.send_message(message.chat.id, "Tavsifni yuboring:")
+            
     elif step == "description":
         state["description"] = message.text.strip()
         state["step"] = "poster"
-        bot.send_message(message.chat.id, "Poster URL manzilini yuboring (rasm linki):")
+        bot.send_message(message.chat.id, "Poster URL manzilini yuboring (rasm linki):\nMisol: https://example.com/poster.jpg")
+        
     elif step == "poster":
         state["poster_url"] = message.text.strip()
         state["step"] = "duration"
-        bot.send_message(message.chat.id, "Davomiyligini yuboring (masalan: 120 min):")
+        bot.send_message(message.chat.id, "Davomiyligini yuboring (masalan: 120 min, 2 soat):")
+        
     elif step == "duration":
         state["duration"] = message.text.strip()
         state["step"] = "director"
         bot.send_message(message.chat.id, "Rejissyor ismini yuboring:")
+        
     elif step == "director":
         state["director"] = message.text.strip()
         state["step"] = "actors"
-        bot.send_message(message.chat.id, "Aktyorlarni vergul bilan ajratib yuboring:")
+        bot.send_message(message.chat.id, "Aktyorlarni vergul bilan ajratib yuboring (masalan: Aktyor1, Aktyor2, Aktyor3):")
+        
     elif step == "actors":
         state["actors"] = message.text.strip()
-        add_movie(
-            state["name"], state["year"], state["genre"], state["rating"],
-            state["description"], state["poster_url"], state["duration"],
-            state["director"], state["actors"]
-        )
-        bot.send_message(message.chat.id, "✅ Kino muvaffaqiyatli qo'shildi!")
-        del user_states[user_id]
-        show_admin_panel(message.chat.id)
+        
+        # Save to database
+        try:
+            add_movie(
+                state["name"], state["year"], state["genre"], state["rating"],
+                state["description"], state["poster_url"], state["duration"],
+                state["director"], state["actors"]
+            )
+            
+            # Verify the movie was saved correctly
+            new_movie = search_movies(state["name"])
+            if new_movie:
+                logger.info(f"Movie saved successfully: {new_movie[0][1]}")
+                bot.send_message(message.chat.id, 
+                    f"✅ Kino muvaffaqiyatli qo'shildi!\n\n"
+                    f"🎬 Nomi: {state['name']}\n"
+                    f"📅 Yil: {state['year']}\n"
+                    f"⭐ Reyting: {state['rating']}\n"
+                    f"🎭 Janr: {state['genre']}")
+            else:
+                bot.send_message(message.chat.id, "⚠️ Kino qo'shildi lekin tekshirishda topilmadi.")
+            
+        except Exception as e:
+            logger.error(f"Error saving movie: {e}")
+            bot.send_message(message.chat.id, f"❌ Xatolik yuz berdi: {str(e)}")
+        
+        finally:
+            del user_states[user_id]
+            show_admin_panel(message.chat.id)
 
 def process_filter_genre(message: Message, user_id: int):
     genre = message.text.strip()
@@ -855,7 +939,6 @@ def process_filter_rating(message: Message, user_id: int):
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
-        # FIX: de_json expects only one argument in newer pyTelegramBotAPI versions
         update = Update.de_json(json_string)
         bot.process_new_updates([update])
         return 'OK', 200
@@ -870,10 +953,9 @@ def index():
 if __name__ == "__main__":
     init_db()
 
-    # Initialize admins from environment variable ADMIN_IDS (comma-separated)
-    admin_ids_str = os.environ.get("ADMIN_IDS", "")
-    if admin_ids_str:
-        for aid_str in admin_ids_str.split(","):
+    # Initialize admins from environment variable ADMIN_IDS
+    if ADMIN_IDS:
+        for aid_str in ADMIN_IDS.split(","):
             try:
                 aid = int(aid_str.strip())
                 execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (aid,))
@@ -881,14 +963,6 @@ if __name__ == "__main__":
                 logger.info(f"Added admin {aid}")
             except ValueError:
                 pass
-    if DEFAULT_ADMIN_ID:
-        try:
-            did = int(DEFAULT_ADMIN_ID)
-            execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (did,))
-            add_admin(did)
-            logger.info(f"Added default admin {did}")
-        except ValueError:
-            pass
 
     # Set webhook
     bot.remove_webhook()
