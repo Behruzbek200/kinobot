@@ -28,7 +28,7 @@ if not TOKEN:
 
 DEFAULT_ADMIN_ID = os.environ.get("DEFAULT_ADMIN_ID")
 RENDER_EXTERNAL_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://your-app.onrender.com")
-WEBHOOK_PATH = f"/webhook/{TOKEN}"  # secret path
+WEBHOOK_PATH = f"/webhook/{TOKEN}"
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}{WEBHOOK_PATH}"
 
 DB_NAME = "movies.db"
@@ -52,7 +52,7 @@ user_search_results: Dict[int, List[Tuple]] = {}
 user_current_page: Dict[int, int] = {}
 
 # ---------------------------------------------------------------
-# Database helper functions (unchanged)
+# Database helper functions
 # ---------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_NAME)
@@ -179,9 +179,7 @@ def check_user_subscription(user_id: int) -> Tuple[bool, List[str]]:
 def update_last_sub_check(user_id: int):
     execute_query("UPDATE users SET last_sub_check = CURRENT_TIMESTAMP WHERE user_id = ?", (user_id,))
 
-# Subscription wrapper for callbacks and messages
 def ensure_subscription(user_id: int, chat_id: int) -> bool:
-    """Returns True if subscribed, else sends prompt and returns False."""
     row = execute_query("SELECT last_sub_check FROM users WHERE user_id = ?", (user_id,), fetch_one=True)
     need_check = True
     if row:
@@ -205,7 +203,6 @@ def ensure_subscription(user_id: int, chat_id: int) -> bool:
             return False
     return True
 
-# Decorator for message handlers (simple)
 def subscription_required(handler):
     @wraps(handler)
     def wrapper(message: Message):
@@ -215,7 +212,7 @@ def subscription_required(handler):
             return handler(message)
     return wrapper
 
-# ---------------------------- Movie CRUD (unchanged) -------------------------
+# ---------------------------- Movie CRUD ---------------------------------
 def add_movie(name, year, genre, rating, description, poster_url, duration, director, actors):
     execute_query("""
         INSERT INTO movies (name, year, genre, rating, description, poster_url, duration, director, actors)
@@ -334,9 +331,9 @@ def build_search_keyboard(user_id, page=0, per_page=5):
     if nav_buttons:
         markup.row(*nav_buttons)
     markup.add(InlineKeyboardButton("🏠 Asosiy menyu", callback_data="main_menu"))
-    return markup, movies_page
+    return markup
 
-# ---------------------------- Handlers (mostly unchanged) --------------------
+# ---------------------------- Handlers ---------------------------------
 def show_main_menu(chat_id):
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
@@ -392,7 +389,7 @@ def handle_text(message: Message):
         user_id = message.from_user.id
         user_search_results[user_id] = results
         user_current_page[user_id] = 0
-        markup, _ = build_search_keyboard(user_id, 0)
+        markup = build_search_keyboard(user_id, 0)
         bot.send_message(message.chat.id, f"🔍 <b>\"{text}\" bo'yicha natijalar:</b>", reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -401,7 +398,6 @@ def handle_callback(call: CallbackQuery):
     chat_id = call.message.chat.id
     data = call.data
 
-    # Subscription check for callbacks
     if not ensure_subscription(user_id, chat_id):
         return
 
@@ -447,7 +443,7 @@ def handle_callback(call: CallbackQuery):
             return
         user_search_results[user_id] = favs
         user_current_page[user_id] = 0
-        markup, _ = build_search_keyboard(user_id, 0)
+        markup = build_search_keyboard(user_id, 0)
         bot.send_message(chat_id, "⭐ <b>Sevimli kinolar</b>", reply_markup=markup, parse_mode="HTML")
         return
 
@@ -505,7 +501,7 @@ def handle_callback(call: CallbackQuery):
     elif data.startswith("page_"):
         page = int(data.split("_")[1])
         user_current_page[user_id] = page
-        markup, _ = build_search_keyboard(user_id, page)
+        markup = build_search_keyboard(user_id, page)
         bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
         return
 
@@ -516,6 +512,7 @@ def handle_callback(call: CallbackQuery):
         show_admin_panel(chat_id)
         return
 
+    # Admin callbacks (same as before)
     elif data == "admin_add_movie":
         if not is_admin(user_id):
             return
@@ -629,7 +626,6 @@ def handle_callback(call: CallbackQuery):
         ch = data.split("_")[2]
         remove_required_channel(ch)
         bot.answer_callback_query(call.id, f"@{ch} o'chirildi!")
-        # Refresh
         handle_callback(CallbackQuery(id="", from_user=call.from_user, message=call.message, data="admin_channels"))
         return
 
@@ -643,7 +639,7 @@ def handle_callback(call: CallbackQuery):
     elif data == "back_to_list":
         if user_id in user_search_results and user_search_results[user_id]:
             page = user_current_page.get(user_id, 0)
-            markup, _ = build_search_keyboard(user_id, page)
+            markup = build_search_keyboard(user_id, page)
             bot.edit_message_reply_markup(chat_id, call.message.message_id, reply_markup=markup)
         else:
             show_main_menu(chat_id)
@@ -821,7 +817,7 @@ def process_filter_genre(message: Message, user_id: int):
         return
     user_search_results[user_id] = results
     user_current_page[user_id] = 0
-    markup, _ = build_search_keyboard(user_id, 0)
+    markup = build_search_keyboard(user_id, 0)
     bot.send_message(message.chat.id, f"🎭 Janr: {genre} bo'yicha natijalar:", reply_markup=markup)
 
 def process_filter_year(message: Message, user_id: int):
@@ -836,7 +832,7 @@ def process_filter_year(message: Message, user_id: int):
         return
     user_search_results[user_id] = results
     user_current_page[user_id] = 0
-    markup, _ = build_search_keyboard(user_id, 0)
+    markup = build_search_keyboard(user_id, 0)
     bot.send_message(message.chat.id, f"📅 {year} yilidagi kinolar:", reply_markup=markup)
 
 def process_filter_rating(message: Message, user_id: int):
@@ -851,7 +847,7 @@ def process_filter_rating(message: Message, user_id: int):
         return
     user_search_results[user_id] = results
     user_current_page[user_id] = 0
-    markup, _ = build_search_keyboard(user_id, 0)
+    markup = build_search_keyboard(user_id, 0)
     bot.send_message(message.chat.id, f"⭐ Reyting {rating}+ bo'lgan kinolar:", reply_markup=markup)
 
 # ---------------------------- Flask webhook endpoint -------------------------
@@ -859,17 +855,22 @@ def process_filter_rating(message: Message, user_id: int):
 def webhook():
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
-        update = Update.de_json(json_string, bot)
+        # FIX: de_json expects only one argument in newer pyTelegramBotAPI versions
+        update = Update.de_json(json_string)
         bot.process_new_updates([update])
         return 'OK', 200
     else:
         abort(403)
 
+@app.route('/', methods=['GET'])
+def index():
+    return "MovieSearchBot is running!", 200
+
 # ---------------------------- Main -------------------------------------------
 if __name__ == "__main__":
     init_db()
 
-    # Initialize admins from environment variable (comma-separated IDs)
+    # Initialize admins from environment variable ADMIN_IDS (comma-separated)
     admin_ids_str = os.environ.get("ADMIN_IDS", "")
     if admin_ids_str:
         for aid_str in admin_ids_str.split(","):
@@ -885,6 +886,7 @@ if __name__ == "__main__":
             did = int(DEFAULT_ADMIN_ID)
             execute_query("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (did,))
             add_admin(did)
+            logger.info(f"Added default admin {did}")
         except ValueError:
             pass
 
@@ -893,6 +895,6 @@ if __name__ == "__main__":
     bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook set to {WEBHOOK_URL}")
 
-    # Run Flask server (Render provides PORT)
+    # Run Flask server
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
