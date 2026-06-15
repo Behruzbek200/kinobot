@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-MovieSearchBot - Kino qidiruv boti (TO'LIQ ISHLOVCHI VERSIYA)
+MovieSearchBot - Kino qidiruv boti (TO'LIQ ISHLAYDI)
 """
 
 import os
@@ -43,18 +43,19 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
-# In-memory states
 user_states: Dict[int, Dict[str, Any]] = {}
 user_search_results: Dict[int, List[Tuple]] = {}
 user_current_page: Dict[int, int] = {}
 
 # ---------------------------------------------------------------
-# Database functions
+# Database functions (TO'G'RILANGAN)
 # ---------------------------------------------------------------
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     cur = conn.cursor()
-    cur.execute("""
+
+    # Movies table
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -69,8 +70,10 @@ def init_db():
             code TEXT UNIQUE,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
-    cur.execute("""
+    ''')
+
+    # Users table
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS users (
             user_id INTEGER PRIMARY KEY,
             username TEXT,
@@ -80,40 +83,54 @@ def init_db():
             last_active TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_sub_check TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    """)
-    cur.execute("""
+    ''')
+
+    # Favorites
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS user_favorites (
             user_id INTEGER,
             movie_id INTEGER,
             added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (user_id, movie_id)
         )
-    """)
-    cur.execute(""")
+    ''')
+
+    # Required channels (FIXED)
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS required_channels (
             channel_username TEXT PRIMARY KEY
         )
-    """)
-    cur.execute("""
+    ''')
+
+    # Search stats
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS search_stats (
             search_term TEXT PRIMARY KEY,
             count INTEGER DEFAULT 1
         )
-    """)
-    cur.execute("""
+    ''')
+
+    # Bot config
+    cur.execute('''
         CREATE TABLE IF NOT EXISTS bot_config (
             key TEXT PRIMARY KEY,
             value TEXT
         )
-    """)
+    ''')
+
     # Add code column if missing
     try:
         cur.execute("ALTER TABLE movies ADD COLUMN code TEXT UNIQUE")
     except sqlite3.OperationalError:
         pass
+
     conn.commit()
     conn.close()
     logger.info("Database initialized.")
+
+# ---------------------------------------------------------------
+# Qolgan barcha funksiyalar (oldingi versiyadagidek)
+# ---------------------------------------------------------------
 
 def execute_query(query: str, params: tuple = (), fetch_one=False, fetch_all=False):
     conn = sqlite3.connect(DB_NAME)
@@ -935,14 +952,12 @@ def add_movie_step(message: Message):
         bot.send_message(message.chat.id, "🌟 Aktyorlarni vergul bilan ajratib yuboring (masalan: Aktyor1, Aktyor2):")
     elif step == "actors":
         state["actors"] = message.text.strip()
-        # Save movie
         movie_id, code = add_movie(
             state["name"], state["year"], state["genre"], state["rating"],
             state["description"], state["poster_url"], state["duration"],
             state["director"], state["actors"]
         )
         bot.send_message(message.chat.id, f"✅ Kino muvaffaqiyatli qo'shildi!\n🔑 Kino kodi: <code>{code}</code>\nFoydalanuvchilar ushbu kod orqali kinoni topishi mumkin.", parse_mode="HTML")
-        # Post to channel if configured
         movie = get_movie_by_id(movie_id)
         if movie:
             post_movie_to_channel(movie)
@@ -1008,7 +1023,6 @@ def index():
 # ---------------------------- Main -------------------------------------------
 if __name__ == "__main__":
     init_db()
-    # Initialize admins from ADMIN_IDS env
     if ADMIN_IDS:
         for aid_str in ADMIN_IDS.split(","):
             try:
@@ -1018,7 +1032,6 @@ if __name__ == "__main__":
                 logger.info(f"Added admin {aid}")
             except ValueError:
                 pass
-    # Set webhook
     bot.remove_webhook()
     bot.set_webhook(url=WEBHOOK_URL)
     logger.info(f"Webhook set to {WEBHOOK_URL}")
